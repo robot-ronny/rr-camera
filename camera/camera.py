@@ -134,7 +134,7 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port):
         cv2.putText(frame, "dx: {}, dy: {}".format(dX, dY), (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
 
         if publish:
-            mqttc.publish("object/movement", json.dumps({"x": center[0], "y": center[1], "dx": dX, "dy": dY, "radius": radius}), qos=0)
+            mqttc.publish("ronny/camera/object", json.dumps({"x": center[0], "y": center[1], "dx": dX, "dy": dY, "radius": radius}), qos=0)
 
 
         http.set_frame(frame)
