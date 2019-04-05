@@ -1,0 +1,6 @@
+Click>=6.0
+click-log>=0.2.1
+Pillow
+imutils
+paho-mqtt>=1.0
+picamera[array]
