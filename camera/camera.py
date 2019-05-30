@@ -13,6 +13,7 @@ import imutils
 import time
 import sys
 import json
+import base64
 from .mjpg_stream_server import MjpgStreamServer
 
 logging.basicConfig(format='%(asctime)s %(message)s')
@@ -21,9 +22,25 @@ logging.basicConfig(format='%(asctime)s %(message)s')
 def mqtt_on_connect(mqttc, userdata, flags, rc):
     logging.info('Connected to MQTT broker with code %s', rc)
 
+    logging.debug('Subscribe: %s', "ronny/camera/foto/get")
+    mqttc.subscribe('ronny/camera/foto/get')
+
 
 def mqtt_on_disconnect(mqttc, userdata, rc):
     logging.info('Disconnect from MQTT broker with code %s', rc)
+
+
+def mqtt_on_message(mqttc, userdata, message):
+    logging.debug('Message %s %s', message.topic, message.payload)
+
+    img = userdata['http'].get_img()
+
+    with open("/run/user/1000/img.jpg", "wb") as outfile:
+        outfile.write(img.getvalue())
+
+    # foto = base64.b64encode(img.getvalue())
+
+    # mqttc.publish('ronny/camera/foto', foto)
 
 
 @click.command()
@@ -32,31 +49,36 @@ def mqtt_on_disconnect(mqttc, userdata, rc):
 @click.option('--deque-len', required=True, help='Deque lenngth', default=10, type=int)
 @click.option('--host', 'mqtt_host', type=click.STRING, default="127.0.0.1", help="MQTT host to connect to [default: 127.0.0.1].")
 @click.option('--port', 'mqtt_port', type=click.IntRange(0, 65535), default=1883, help="MQTT port to connect to [default: 1883].")
+@click.option('--imshow', is_flag=True, help="Show image over cv2.imshow.")
 @click_log.simple_verbosity_option(default='INFO')
-def run(video, fps, deque_len, mqtt_host, mqtt_port):
+def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
     logging.info("Process started")
 
     http = MjpgStreamServer()
 
     vs = VideoStream(src=video).start()
 
-    # minHSV = np.array([165, 132, 98])
-    # maxHSV = np.array([195, 255,  255])
+    minHSV = np.array([165, 132, 98])
+    maxHSV = np.array([195, 255,  255])
 
-    minHSV = np.array([0, 137, 11])
-    maxHSV = np.array([5, 255,  255])
+    # minHSV = np.array([0, 137, 11])
+    # maxHSV = np.array([5, 255,  255])
 
     pts = deque(maxlen=deque_len)
     counter = 0
     (dX, dY) = (0, 0)
     direction = ""
 
-    mqttc = paho.mqtt.client.Client(userdata={})
-    mqttc.on_connect = mqtt_on_connect
-    mqttc.on_disconnect = mqtt_on_disconnect
 
-    mqttc.connect(mqtt_host, mqtt_port, keepalive=10)
-    mqttc.loop_start()
+    mqttc = paho.mqtt.client.Client(userdata={'http': http}) if mqtt_host else None
+
+    if mqttc:
+        mqttc.on_connect = mqtt_on_connect
+        mqttc.on_disconnect = mqtt_on_disconnect
+        mqttc.on_message = mqtt_on_message
+
+        mqttc.connect(mqtt_host, mqtt_port, keepalive=10)
+        mqttc.loop_start()
 
     time.sleep(2.0)
 
@@ -133,18 +155,19 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port):
         cv2.putText(frame, direction, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 3)
         cv2.putText(frame, "dx: {}, dy: {}".format(dX, dY), (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
 
-        if publish:
+        if publish and mqttc:
             mqttc.publish("ronny/camera/object", json.dumps({"x": center[0], "y": center[1], "dx": dX, "dy": dY, "radius": radius}), qos=0)
 
 
         http.set_frame(frame)
         counter += 1
 
-        # cv2.imshow("Frame", frame)
-        # key = cv2.waitKey(1) & 0xFF
+        if imshow:
+            cv2.imshow("Frame", frame)
+            key = cv2.waitKey(1) & 0xFF
 
-        # if key == ord("q"):
-        #     break
+            if key == ord("q"):
+                break
 
     vs.stop()
 
