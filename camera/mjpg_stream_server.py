@@ -17,14 +17,17 @@ class CamHandler(BaseHTTPRequestHandler):
             self.end_headers()
             while True:
                 try:
-                    frame = self.server.main.get_frame()
-                    if frame is not None:
+                    # frame = self.server.main.get_frame()
+                    # if frame is not None:
 
-                        imgRGB=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
-                        jpg = Image.fromarray(imgRGB)
-                        tmpFile = BytesIO()
-                        jpg.save(tmpFile,'JPEG')
+                    #     imgRGB=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
+                    #     jpg = Image.fromarray(imgRGB)
+                    #     tmpFile = BytesIO()
+                    #     jpg.save(tmpFile,'JPEG')
 
+                    tmpFile = self.server.main.get_img()
+
+                    if tmpFile is not None:
                         self.wfile.write("--jpgboundary".encode())
                         self.send_header('Content-type','image/jpeg')
                         self.send_header('Content-length',str(tmpFile.getbuffer().nbytes))
@@ -57,6 +60,7 @@ class MjpgStreamServer:
 
     def __init__(self, host='0.0.0.0', port=8080):
         self._frame = None
+        self._tmpFile = None
 
         self.server = ThreadedHTTPServer((host, port), CamHandler)
         self.server.main = self
@@ -76,6 +80,20 @@ class MjpgStreamServer:
     def set_frame(self, frame):
         with self.mutex:
             self._frame = frame
+            self._tmpFile = None
+
+    def get_img(self):
+        with self.mutex:
+            if self._tmpFile:
+                return self._tmpFile
+
+            if self._frame is not None:
+                imgRGB=cv2.cvtColor(self._frame,cv2.COLOR_BGR2RGB)
+                jpg = Image.fromarray(imgRGB)
+                self._tmpFile = BytesIO()
+                jpg.save(self._tmpFile,'JPEG')
+                return self._tmpFile
+
 
 if __name__ == '__main__':
     MjpgStreamServer()
