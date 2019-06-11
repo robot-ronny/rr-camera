@@ -14,6 +14,7 @@ import time
 import sys
 import json
 import base64
+import os
 from .mjpg_stream_server import MjpgStreamServer
 
 logging.basicConfig(format='%(asctime)s %(message)s')
@@ -70,6 +71,10 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
     direction = ""
 
 
+    path = os.path.realpath(os.path.dirname(__file__))
+    face_cascade = cv2.CascadeClassifier(os.path.join(path, 'haarcascade_frontalface_default.xml'))
+    eye_cascade = cv2.CascadeClassifier(os.path.join(path, 'haarcascade_eye.xml'))
+
     mqttc = paho.mqtt.client.Client(userdata={'http': http}) if mqtt_host else None
 
     if mqttc:
@@ -95,6 +100,18 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
         # cv2.imshow("frame", frame)
 
         blurred = cv2.GaussianBlur(frame, (11, 11), 0)
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        for (x,y,w,h) in faces:
+            cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
+            # roi_gray = gray[y:y+h, x:x+w]
+            # roi_color = frame[y:y+h, x:x+w]
+            # eyes = eye_cascade.detectMultiScale(roi_gray)
+            # for (ex,ey,ew,eh) in eyes:
+            #     cv2.rectangle(roi_color,(ex,ey),(ex+ew,ey+eh),(255,0,0),2)
+
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
         mask = cv2.inRange(hsv, minHSV, maxHSV)
@@ -121,9 +138,18 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
                 cv2.circle(frame, (int(x), int(y)), int(radius), (0, 255, 255), 2)
                 cv2.circle(frame, center, 5, (0, 0, 255), -1)
 
-            if len(pts) > 0 and pts[0] is not None:
-                if abs(pts[0][0] - center[0]) > 5 or abs(pts[0][1] - center[1]):
-                    publish = True
+                for (x,y,w,h) in faces:
+                    if x <= center[0] <= x + w and y <= center[1] <= y + h:
+                        cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
+
+                        if len(pts) > 0 and pts[0] is not None:
+                            if abs(pts[0][0] - center[0]) > 5 or abs(pts[0][1] - center[1]):
+                                publish = True
+                        break
+                else:
+                    center = None
+            else:
+                center = None
 
         pts.appendleft(center)
 
