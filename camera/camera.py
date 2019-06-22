@@ -14,6 +14,7 @@ import time
 import sys
 import json
 import base64
+import json
 import os
 from .mjpg_stream_server import MjpgStreamServer
 
@@ -36,11 +37,14 @@ def mqtt_on_message(mqttc, userdata, message):
 
     img = userdata['http'].get_img()
 
-    with open("/run/user/1000/img.jpg", "wb") as outfile:
+    filename = '/run/user/1000/img.jpg'
+
+    with open(filename, "wb") as outfile:
         outfile.write(img.getvalue())
 
-    # foto = base64.b64encode(img.getvalue())
+    mqttc.publish('ronny/camera/foto', json.dumps(filename))
 
+    # foto = base64.b64encode(img.getvalue())
     # mqttc.publish('ronny/camera/foto', foto)
 
 
@@ -57,7 +61,7 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
 
     http = MjpgStreamServer()
 
-    vs = VideoStream(src=video).start()
+    vs = VideoStream(src=video, framerate=fps).start()
 
     minHSV = np.array([165, 132, 98])
     maxHSV = np.array([195, 255,  255])
@@ -69,7 +73,6 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
     counter = 0
     (dX, dY) = (0, 0)
     direction = ""
-
 
     path = os.path.realpath(os.path.dirname(__file__))
     face_cascade = cv2.CascadeClassifier(os.path.join(path, 'haarcascade_frontalface_default.xml'))
@@ -88,6 +91,10 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
     time.sleep(2.0)
 
     logging.info('Loop start')
+
+    detected = False
+    loos_cnd = fps * 5
+
     while True:
 
         time.sleep(0.1)
@@ -104,13 +111,6 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-        for (x,y,w,h) in faces:
-            cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
-            # roi_gray = gray[y:y+h, x:x+w]
-            # roi_color = frame[y:y+h, x:x+w]
-            # eyes = eye_cascade.detectMultiScale(roi_gray)
-            # for (ex,ey,ew,eh) in eyes:
-            #     cv2.rectangle(roi_color,(ex,ey),(ex+ew,ey+eh),(255,0,0),2)
 
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
@@ -128,6 +128,15 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
         radius = None
         publish = False
 
+
+        for (x,y,w,h) in faces:
+            cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
+            # roi_gray = gray[y:y+h, x:x+w]
+            # roi_color = frame[y:y+h, x:x+w]
+            # eyes = eye_cascade.detectMultiScale(roi_gray)
+            # for (ex,ey,ew,eh) in eyes:
+            #     cv2.rectangle(roi_color,(ex,ey),(ex+ew,ey+eh),(255,0,0),2)
+
         if len(cnts) > 0:
             c = max(cnts, key=cv2.contourArea)
             ((x, y), radius) = cv2.minEnclosingCircle(c)
@@ -140,10 +149,17 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
 
                 for (x,y,w,h) in faces:
                     if x <= center[0] <= x + w and y <= center[1] <= y + h:
+
+                        if not detected:
+                            mqttc.publish("ronny/camera/object-detected", "true", qos=0)
+                            detected = True
+                            loos_cnd = 5
+                            publish = True
+
                         cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
 
                         if len(pts) > 0 and pts[0] is not None:
-                            if abs(pts[0][0] - center[0]) > 5 or abs(pts[0][1] - center[1]):
+                            if abs(pts[0][0] - center[0]) > 5 or abs(pts[0][1] - center[1]) > 5:
                                 publish = True
                         break
                 else:
@@ -151,7 +167,16 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
             else:
                 center = None
 
+        if detected and not center:
+            loos_cnd -= 1
+
+            if loos_cnd < 0:
+                mqttc.publish("ronny/camera/object-detected", "false", qos=0)
+                detected = False
+
+
         pts.appendleft(center)
+
 
         for i in np.arange(1, len(pts)):
 
@@ -178,8 +203,8 @@ def run(video, fps, deque_len, mqtt_host, mqtt_port, imshow):
             thickness = int(np.sqrt(deque_len / float(i + 1)) * 2.5)
             cv2.line(frame, pts[i - 1], pts[i], (0, 0, 255), thickness)
 
-        cv2.putText(frame, direction, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 3)
-        cv2.putText(frame, "dx: {}, dy: {}".format(dX, dY), (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
+        #cv2.putText(frame, direction, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 3)
+        #cv2.putText(frame, "dx: {}, dy: {}".format(dX, dY), (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
 
         if publish and mqttc:
             mqttc.publish("ronny/camera/object", json.dumps({"x": center[0], "y": center[1], "dx": dX, "dy": dY, "radius": radius}), qos=0)
