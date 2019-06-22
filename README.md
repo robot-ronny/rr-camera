@@ -21,3 +21,13 @@ pm2 save
 ```
 rr-camera --help
 ```
+
+## MQTT
+
+If object detected or lost
+
+ronny/camera/object-detected  bool
+
+If object move
+
+ronny/camera/object {"x": int, "y": int, "dx": int, "dy": int, "radius": int}
